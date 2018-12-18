@@ -454,9 +454,9 @@ end
 
 function make_plyr(p,angle)
 	local model,q=all_models["205gti"],make_q(v_up,angle or 0)
-	local brake,turn,traction,rpm,max_rpm,rpm_decay=0,0,0,0,32,0
-
-	local add_tireforce=function(self,offset,right,fwd,brake,rpm)
+	local brake,turn,traction,traction_ratio,rpm,max_rpm,rpm_decay=0,0,0,0,0,32,0
+	
+	local add_tireforce=function(self,offset,right,fwd,brake,rpm,sensor)
 		-- force to world
 		right=m_x_v(self.m,right)
 		fwd=m_x_v(self.m,fwd)
@@ -475,41 +475,46 @@ function make_plyr(p,angle)
 			sa=-v_dot(right,relv)
 
 			-- limiting factor (normalized unit)
-			local t=acos(abs(sa)/sqrt(relv_len))-0.75
- 		t*=360/25
-			plyr.slip_angles[rpm and 2 or 1]=t
-			sa_ratio=apply_curve(sr_curve,t)
+			-- local t=acos(abs(sa)/sqrt(relv_len))-0.75
+ 			-- t*=360/90
+ 			-- make sure to include velocity
+ 			-- to compute ratio
+ 			local t=abs(sa)/8
+			plyr.slip_angles[sensor]=abs(sa)
+			sa_ratio=apply_curve(sa_curve,t)
 		end	
 		
 		-- long. slip
 		relv_len=v_dot(fwd,relv)
 		-- convert rpm to rps
-		local sr=(brake*(rpm or relv_len)-relv_len)
+		local sr=brake*(rpm or relv_len)-relv_len
 		if abs(relv_len)>k_small then
 			sr/=abs(relv_len)
 		end
-		local sr_ratio=sa_ratio*apply_curve(sr_curve,abs(sr))
+		local sr_ratio=apply_curve(sr_curve,abs(sr))
 		-- todo: include speed
 		if sr_ratio<0.25 then
 			slide=true
 		end
 		-- todo: include terrain quality
-		plyr.slip_ratio[rpm and 2 or 1]=abs(sr)
+		plyr.slip_ratio[sensor]=abs(sr)
 				
 		-- adjust long.
-		sr*=48*sr_ratio
+		sr*=96*sr_ratio*sa_ratio
 
 		-- limit overall enveloppe
-		sa*=48*sr_ratio
+		sa*=plyr.mass*sr_ratio*sa_ratio
+		-- 
+		-- sa=mid(sa,-16,16)
 		
 		-- impulse factors
-		sa*=self.traction_ratio
+		sa*=traction_ratio
 		if abs(sa)>k_small then
 			v_scale(right,sa)
 			self:add_impulse(right,pos)
 		end
 		
-		sr*=self.traction_ratio
+		sr*=traction_ratio
 		if abs(sr)>k_small then
 			v_scale(fwd,sr)
 			self:add_force(fwd,pos)
@@ -522,13 +527,12 @@ function make_plyr(p,angle)
 			make_part("smoke",pos)
 		end
 
-		return sr_ratio*self.traction_ratio
+		return sa_ratio*sr_ratio*traction_ratio
 	end
 
 	local a={
 		mass=32,
 		hardness=0.02,
-		traction_ratio=0,
 		pos=v_clone(p),
 		q=q,
 		-- init orientation
@@ -567,9 +571,7 @@ function make_plyr(p,angle)
 			end
 			-- accelerate
 			if btn(2) then
-				rpm=min(rpm+1.8,max_rpm)
-			else
-				rpm=max(rpm-0.3)
+				rpm=min(rpm+3,max_rpm)
 			end
 		
 			-- steering angle
@@ -579,9 +581,9 @@ function make_plyr(p,angle)
 			
 			-- front wheels
 			local c,s=cos(angle),sin(angle)
-			add_tireforce(self,1,{c,0,-s},{s,0,c},brake)
+			add_tireforce(self,1,{c,0,-s},{s,0,c},brake,nil,1)
 			-- rear wheels
-			rpm_decay=add_tireforce(self,-1.2,v_right,v_fwd,btn(5) and 0 or brake,rpm)
+			rpm_decay=add_tireforce(self,-1.2,v_right,v_fwd,btn(5) and 0 or brake,rpm,2)
 
 			if btn(4) then
 				local pos=v_clone(self.pos)
@@ -593,12 +595,12 @@ function make_plyr(p,angle)
 		end,
 		update=function(self)
 			traction+=self:up_ratio()
-			self.traction_ratio=traction/20
+			traction_ratio=traction/20
 			
 			-- time decay
-			traction*=0.8
+			traction*=0.2
 			turn*=0.92
-			--rpm*=(1-0.24*rpm_decay)
+			rpm*=lerp(0.9,0.7,rpm_decay)
 			
 			self.rpm_ratio=rpm/max_rpm
 
@@ -1013,13 +1015,13 @@ function make_cam(focal)
 		end,
 		project=function(self,v)
 			-- pitch 
-			local x,y,z=v[1]-self.lookat[1],-self.lookat[2],v[3]-self.lookat[3]
+			local x,y,z=v[1]-self.lookat[1],v[2]-self.lookat[2],v[3]-self.lookat[3]
 			z,y=cc*z+ss*y,-ss*z+cc*y
 
 			local xe,ye,ze=x,y,z-dist
 
 			local w=-focal/ze
-  			return 64+xe*w,64-(v[2]+ye)*w,ze,w
+  			return 64+xe*w,64-ye*w,ze,w
 		end
 	}
 end
@@ -1188,7 +1190,7 @@ function get_raw_qcode(i,j)
 	return qmap[safe_index(i,j)] or 0
 end
 function get_height(i,j)
-	return hmap[safe_index(i,j)]
+	return hmap[safe_index(i,j)] or 0
 end
 
 -- return altitude & normal (optional)
@@ -1261,6 +1263,7 @@ local shade=function(lvl,c)
 	return bor(shl(sget(max(lvl-1)+16,c),4),sget(lvl+16,c))
 end
 
+--[[
 function draw_ground(self)
 	local cx,cz=cam.lookat[1],cam.lookat[3]
 	-- cell x/z ratio
@@ -1374,6 +1377,43 @@ function draw_ground(self)
 	-- last strip
 	draw_actors(nj)
 end
+]]
+
+function draw_ground()
+	local cx,cz=cam.lookat[1],cam.lookat[3]
+	-- cell x/z ratio
+	local dx,dz=cx%ground_scale,cz%ground_scale
+	-- cell coordinates
+	local nx,ny=flr(shr(cx,ground_shift)),flr(shr(cz,ground_shift))
+	
+	-- project anchor points
+	local p,i={},nx
+	for ii=ground_left,ground_right do
+ 		local j,row=ny,{}
+ 		for jj=ground_near,ground_far do
+				local x,y=cam:project({
+					mid(shl(ii,ground_shift)-dx+cx,cx+shl(ground_left,ground_shift),cx+shl(ground_right-2,ground_shift)),
+					get_height(cx+ii+nx,cz+jj+ny),
+					mid(shl(jj,ground_shift)-dz+cz,cz+shl(ground_near,ground_shift),cz+shl(ground_far-2,ground_shift))})
+				add(row,{flr(x),flr(y),ny+j})
+				j+=1
+			end
+	add(p,row)
+	end
+
+	local r0=p[1]
+	for j=2,#p do
+		local r1=p[j]
+		local v0,v3=r0[1],r1[1]
+		for i=2,#r1 do
+			local v1,v2=r0[i],r1[i]
+			trifill(v0[1],v0[2],v1[1],v1[2],v3[1],v3[2],7)
+			trifill(v1[1],v1[2],v2[1],v2[2],v3[1],v3[2],6)
+			v0,v3=v1,v2
+		end
+		r0=r1
+	end
+end
 
 -- game states
 -- transition to next state
@@ -1471,7 +1511,7 @@ function _update()
 		v_add(lookat,m_fwd(plyr.m),3)
 		-- keep altitude
 		lookat[2]=plyr.pos[2]+2
-		cam:track(lookat,0.15,mid(sqrt(v_dot(plyr.v,plyr.v)),8,15))
+		cam:track(lookat,0.15,15)--mid(sqrt(v_dot(plyr.v,plyr.v)),8,15))
 	end
 end
 
@@ -1491,8 +1531,14 @@ end
 
 -- print box
 function printb(s,x,y,c)
+	for i=-1,1 do
+		for j=-1,2 do
+			print(s,x+i,y+j,0)
+		end
+	end
 	print(s,x,y+1,1)
 	print(s,x,y,c)
+
 end
 
 function banner(c,t)
@@ -1548,15 +1594,19 @@ function _draw()
 	
 	draw_state()
 	
+	plyr:draw()
+	
 	draw_curve("f.sa",1,20,plyr.slip_angles[1],sa_curve)
 	draw_curve("r.sa",1,46,plyr.slip_angles[2],sa_curve)
 
 	draw_curve("f.sr",94,20,plyr.slip_ratio[1],sr_curve)
 	draw_curve("r.sr",94,46,plyr.slip_ratio[2],sr_curve)
 		
+	--[[	
 	if plyr.angle then
 		print((plyr.angle-1)*360,2,74,7)
-	end
+	end	
+	]]
 	--rectfill(0,0,127,8,8)
 	--print("mem:"..stat(0).." cpu:"..stat(1).."("..stat(7)..")",2,2,7)
  
@@ -1590,8 +1640,8 @@ function _init()
 	unpack_rle(function(v)
 		tmp_hmap[i],tmp_hmap[i+1]=shr(band(0xf0,v),4),band(0xf,v)
 		-- lower heightmap
-		tmp_hmap[i]/=3
-		tmp_hmap[i+1]/=3
+		tmp_hmap[i]/=2
+		tmp_hmap[i+1]/=2
 		i+=2
 		return i<0x1000
 	end)
@@ -1944,11 +1994,11 @@ eeee1111eeeeeeeeeeeee11111eeeeee000000000010000000011100000001000000000000000000
 0838f640d0e001f04011001171917191000837b940d02040e0401100a000a071117108354940e0408001409091000272020291891749408060f0014012711200
 9100917108094940d0f06020409091029172020002861749d0060808080806080a380a080808080a0608080a0808080608080a0808b9f6e9c80808994926c808
 b040207021f14110d0d0a1321080b9f684b9f6fb56f6fb56f684b6b9b459b9b4b6b94b59b94b6040405070300086285840208060100089285840307080200008
-ab584040302010000838f64050608070000808b9401060504000089458600648080a48080878f9080608080a0808280608e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7
-e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7b7875727f6c696663606d5a5754515e4b4845424f3c393633303d2a2724212f1d1d1c1c1b1b1a1a191918181717161
-6161515141413131212111110101f0f0f0e0e0d0d0c0c0b0b0a0a0909080807070706060505040403030202010100000000876768696a6b6c6d6e6f6f6071727
-3747576777878787877777676757575747473737272717171717e6c6a686664626f5d5b59575553515e4c4a48464442404f3d3c3b3a39373635343331303f2e2
-d2c2a2928272624232221202e1d1d1c1c1c1c1c1c1c1c1b1b1b1b1b1b1b1b1b1a1a1a1a1a1a1a1a1a1919191919191919191ff00ff00ff00ff00ff00ff00ff00
+ab584040302010000838f64050608070000808b9401060504000089458600648080a48080878f9080608080a0808280608b3e3145484c4f43565a5d5164686b6
+f627575757575757575757575757575757575757673707d6a6764616e5b595653505d4a4744414f3c393633303d2a2724232221202f1f1e1d1c1b1b1a1918171
+716151413131211101f0f0e0d0c0b0b0a0a0a0a0a0a0a0a0a0a0909090909090909090909080808080808080808080808008f7f7f7f7f7f7f7f7f7f7f7f7f7f7
+f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7e7e7d7d7c7c7b7b7a7a79797878777776767575747473737272717170707f6f6e6e6d6d6c6c6b6b6a6a6969686
+8676766666565646463636262616160606f5f5f5c5a585654525f4d4b49474542404e3c3a383533313f2d2b28262422202e1ff00ff00ff00ff00ff00ff00ff00
 4a00800a9084dd00802a90847d00805890110a211590845d00805890112a2128902d00803890117a2128906900802990847a00803890118a2128905900804990
 841a00805890119821a0a990a4682128902900803890112921159084f900805890119821a0b990115821a0901019008038901149212890e900809011b821a058
 90102900144890115821a09010f8008038901179212890e9002890b821a05890103900803890115821a09010f800803890118921159084d90028906821a05890
