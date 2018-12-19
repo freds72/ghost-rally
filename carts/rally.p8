@@ -1002,22 +1002,27 @@ end
 function make_cam(focal)
 	-- camera rotation
 	local cc,ss=1,0
+	local ccy,ssy=1,0
 	local dist=shl(8,ground_shift)
 	return {
 		pos={0,6*hscale,0},
 		lookat={0,0,-7*16},
-		track=function(self,pos,angle,d)
-			dist=d
+		track=function(self,pos,zangle,yangle)
+			dist=15
 			self.pos=v_clone(pos)
 			self.lookat=v_clone(pos)
-			cc,ss=cos(angle),-sin(angle)
+			cc,ss=cos(zangle),-sin(zangle)
+			ccy,ssy=cos(yangle),-sin(yangle)
 			v_add(self.pos,{0,dist*ss,dist*cc})
 		end,
 		project=function(self,v)
+			-- cam offset
+			v=make_v(self.lookat,v)
 			-- pitch 
-			local x,y,z=v[1]-self.lookat[1],v[2]-self.lookat[2],v[3]-self.lookat[3]
+			local x,y,z=v[1],v[2],v[3]
+			x,z=ccy*x+ssy*z,-ssy*x+ccy*z
 			z,y=cc*z+ss*y,-ss*z+cc*y
-
+			
 			local xe,ye,ze=x,y,z-dist
 
 			local w=-focal/ze
@@ -1378,7 +1383,7 @@ function draw_ground(self)
 	draw_actors(nj)
 end
 ]]
-
+local dither_pat={0b1111111111111111,0b0111111111111111,0b0111111111011111,0b0101111111011111,0b0101111101011111,0b0101101101011111,0b0101101101011110,0b0101101001011110,0b0101101001011010,0b0001101001011010,0b0001101001001010,0b0000101001001010,0b0000101000001010,0b0000001000001010,0b0000001000001000,0b0000000000000000}
 function draw_ground()
 	local cx,cz=cam.lookat[1],cam.lookat[3]
 	-- cell x/z ratio
@@ -1388,31 +1393,55 @@ function draw_ground()
 	
 	-- project anchor points
 	local p,i={},nx
+	local xmin,xmax,zmin,zmax=cx+shl(ground_left,ground_shift),cx+shl(ground_right-2,ground_shift),cz+shl(ground_near,ground_shift),cz+shl(ground_far-2,ground_shift)
 	for ii=ground_left,ground_right do
- 		local j,row=ny,{}
- 		for jj=ground_near,ground_far do
-				local x,y=cam:project({
-					mid(shl(ii,ground_shift)-dx+cx,cx+shl(ground_left,ground_shift),cx+shl(ground_right-2,ground_shift)),
-					get_height(cx+ii+nx,cz+jj+ny),
-					mid(shl(jj,ground_shift)-dz+cz,cz+shl(ground_near,ground_shift),cz+shl(ground_far-2,ground_shift))})
-				add(row,{flr(x),flr(y),ny+j})
-				j+=1
-			end
-	add(p,row)
+		local row={}
+		for jj=ground_near,ground_far do
+			local x,y,z,w=cam:project({
+			mid(shl(ii,ground_shift)-dx+cx,xmin,xmax),
+			get_height(ii+nx,jj+ny),
+			mid(shl(jj,ground_shift)-dz+cz,zmin,zmax)})
+			add(row,{flr(x),flr(y),w,get_raw_qcode(ii+nx,jj+ny),nx+ii,ny+jj})
+		end
+		add(p,row)
 	end
 
 	local r0=p[1]
 	for j=2,#p do
 		local r1=p[j]
 		local v0,v3=r0[1],r1[1]
+		local x0,y0,x3,y3=v0[1],v0[2],v3[1],v3[2]
+		local q0,w0=v0[4],v0[3]
 		for i=2,#r1 do
 			local v1,v2=r0[i],r1[i]
-			trifill(v0[1],v0[2],v1[1],v1[2],v3[1],v3[2],7)
-			trifill(v1[1],v1[2],v2[1],v2[2],v3[1],v3[2],6)
-			v0,v3=v1,v2
+			local x1,y1,x2,y2=v1[1],v1[2],v2[1],v2[2]
+			local q1,w1=v1[4],v1[3]
+			
+			local c_hi,c_lo,c_dither=shr(band(0b00111000,q0),3),band(0b111,q0)
+
+			--[[
+			local strip=(nj%4<2) and 0 or 1
+			strip+=((ni%4<2) and 0 or 1)
+			]]
+			c_hi,c_lo=shade(1,c_hi),shade(1,c_lo)
+
+			-- fillp(dither_pat2[strip+1])
+			fillp(lerparray(dither_pat,w0/32))
+
+			if band(q0,0x40)>0 then
+				trifill(x0,y0,x2,y2,x1,y1,c_hi)
+				trifill(x0,y0,x2,y2,x3,y3,c_lo)
+			else
+				trifill(x1,y1,x3,y3,x0,y0,c_lo)
+				trifill(x1,y1,x3,y3,x2,y2,c_hi)
+			end
+			v0,v3,q0=v1,v2,q1
+			x0,y0,x3,y3=x1,y1,x2,y2
+			w0=w1
 		end
 		r0=r1
 	end
+	fillp()
 end
 
 -- game states
@@ -1508,10 +1537,11 @@ function _update()
 	if plyr then
 		-- update cam
 		local lookat=v_clone(plyr.pos)
-		v_add(lookat,m_fwd(plyr.m),3)
+		-- v_add(lookat,m_fwd(plyr.m),3)
 		-- keep altitude
 		lookat[2]=plyr.pos[2]+2
-		cam:track(lookat,0.15,15)--mid(sqrt(v_dot(plyr.v,plyr.v)),8,15))
+		local yangle=atan2(plyr.v[1],plyr.v[3])-0.5
+		cam:track(lookat,0.15,yangle)--mid(sqrt(v_dot(plyr.v,plyr.v)),8,15))
 	end
 end
 
@@ -1595,20 +1625,20 @@ function _draw()
 	draw_state()
 	
 	plyr:draw()
-	
+	--[[
 	draw_curve("f.sa",1,20,plyr.slip_angles[1],sa_curve)
 	draw_curve("r.sa",1,46,plyr.slip_angles[2],sa_curve)
 
 	draw_curve("f.sr",94,20,plyr.slip_ratio[1],sr_curve)
 	draw_curve("r.sr",94,46,plyr.slip_ratio[2],sr_curve)
-		
+	]]
 	--[[	
 	if plyr.angle then
 		print((plyr.angle-1)*360,2,74,7)
 	end	
 	]]
-	--rectfill(0,0,127,8,8)
-	--print("mem:"..stat(0).." cpu:"..stat(1).."("..stat(7)..")",2,2,7)
+	rectfill(0,0,127,8,8)
+	print("mem:"..stat(0).." cpu:"..stat(1).."("..stat(7)..")",2,2,7)
  
  --print(plyr.acc,2,18,7)
  
