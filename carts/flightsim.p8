@@ -492,6 +492,9 @@ function control_plyr(self)
 	local q=make_q(m_right(plyr.m),-self.pitch/256)
 	q_x_q(q,make_q(m_fwd(plyr.m),self.roll/256))
 	q_x_q(q,plyr.q)
+	-- avoid matrix skew
+	q_normz(q)
+
 	local m=m_from_q(q)
 	local fwd=m_fwd(m)
 	v_add(self.pos,fwd,self.acc)
