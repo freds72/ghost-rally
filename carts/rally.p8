@@ -1423,17 +1423,18 @@ function draw_ground()
 			local strip=(nj%4<2) and 0 or 1
 			strip+=((ni%4<2) and 0 or 1)
 			]]
-			c_hi,c_lo=shade(1,c_hi),shade(1,c_lo)
+			-- c_hi,c_lo=shade(1,c_hi),shade(1,c_lo)
 
 			-- fillp(dither_pat2[strip+1])
-			fillp(lerparray(dither_pat,w0/32))
-
-			if band(q0,0x40)>0 then
-				trifill(x0,y0,x2,y2,x1,y1,c_hi)
-				trifill(x0,y0,x2,y2,x3,y3,c_lo)
-			else
-				trifill(x1,y1,x3,y3,x0,y0,c_lo)
-				trifill(x1,y1,x3,y3,x2,y2,c_hi)
+			--fillp(lerparray(dither_pat,w0/32))
+			if c_hi>=1 or c_lo>=1 then
+				if band(q0,0x40)>0 then
+					trifill(x0,y0,x2,y2,x1,y1,c_hi)
+					trifill(x0,y0,x2,y2,x3,y3,c_lo)
+				else
+					trifill(x1,y1,x3,y3,x0,y0,c_lo)
+					trifill(x1,y1,x3,y3,x2,y2,c_hi)
+				end
 			end
 			v0,v3,q0=v1,v2,q1
 			x0,y0,x3,y3=x1,y1,x2,y2
@@ -1540,7 +1541,8 @@ function _update()
 		-- v_add(lookat,m_fwd(plyr.m),3)
 		-- keep altitude
 		lookat[2]=plyr.pos[2]+2
-		local yangle=atan2(plyr.v[1],plyr.v[3])-0.5
+		local fwd=m_fwd(plyr.m)
+		local yangle=-atan2(fwd[1],fwd[3])+0.25
 		cam:track(lookat,0.15,yangle)--mid(sqrt(v_dot(plyr.v,plyr.v)),8,15))
 	end
 end

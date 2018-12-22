@@ -61,9 +61,8 @@ for v in obdata.vertices:
 # faces:
 s = s + "{:02x}".format(len(bm.faces))
 for f in bm.faces:
-    # face point index    
-    # + vertex count
-    s = s + "{:02x}{:02x}".format(f.verts[0].index+1,len(f.verts))
+    # vertex count
+    s = s + "{:02x}".format(len(f.verts))
     # vertice id's
     for v in f.verts:
         s = s + "{:02x}".format(v.index+1)
@@ -71,25 +70,19 @@ for f in bm.faces:
     v = f.calc_center_median_weighted()
     s = s + "{}{}{}".format(pack_float(v.x), pack_float(v.z), pack_float(v.y))
     # + color
-    slot = obj.material_slots[f.material_index]
-    mat = slot.material
-    s = s + "{:02x}".format(diffuse_to_p8color(mat.diffuse_color))
-    # + dual-sided?
-    s = s + "{:02x}".format(0 if mat.game_settings.use_backface_culling else 1)
+    if obj.material_slots:
+        slot = obj.material_slots[f.material_index]
+        mat = slot.material
+        s = s + "{:02x}".format(diffuse_to_p8color(mat.diffuse_color))
+        # + dual-sided?
+        s = s + "{:02x}".format(0 if mat.game_settings.use_backface_culling else 1)
+    else:
+        s = s + "{:02x}{:02x}".format(0,0)
 
 #normals
 s = s + "{:02x}".format(len(obdata.polygons))
 for f in obdata.polygons:
     s = s + "{}{}{}".format(pack_float(f.normal.x), pack_float(f.normal.z), pack_float(f.normal.y))
-
-# all edges and corresponding faces
-s = s + "{:02x}".format(len(bm.edges))
-for e in bm.edges:
-    s = s + "{:02x}{:02x}".format(e.verts[0].index+1, e.verts[1].index+1)
-    # number of connected faces
-    s = s + "{:02x}".format(len(e.link_faces))
-    for f in e.link_faces:
-        s = s + "{:02x}".format(f.index+1)
 
 #
 with open(args.out, 'w') as f:
