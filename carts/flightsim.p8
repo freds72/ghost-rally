@@ -235,7 +235,6 @@ function m_right(m)
 end
 
 -- models
--- models
 local all_models={
 	landing_strip={
 		c=6,
@@ -264,7 +263,7 @@ end
 
 -- little hack to perform in-place data updates
 local draw_session_id=0
-local znear,zdir=3,-1
+local znear,zdir=1,-1
 function draw_model(model,m,x,y,z,w)
 	draw_session_id+=1
 
@@ -312,7 +311,8 @@ function draw_model(model,m,x,y,z,w)
 	end
 end
 
-function plane_ray_intersect(n,p,a,b)
+function plane_ray_intersect(n,p,a,b,sky)
+	if(v_dot(make_v(a,p),n)>0) add(sky,a)
 	local r=make_v(a,b)
 	local den=v_dot(r,n)
 	-- no intersection
@@ -322,7 +322,7 @@ function plane_ray_intersect(n,p,a,b)
 			-- intersect pos
 			v_scale(r,t)
 			v_add(r,a)
-			return r
+			add(sky,r)
 		end
 	end
 end
@@ -399,7 +399,7 @@ function make_cam(x0,y0,focal)
 			z-=self.pos[3]
 			x,y,z=m_x_xyz(self.m,x,y,z)
 			-- too close to cam plane?
-			if(z<0.001) return nil,nil,-1,nil
+			if(z<1) return nil,nil,-1,nil
 			-- view to screen
 	 		local w=focal/z
  			return x0+x*w,y0-y*w,z,w
@@ -414,50 +414,77 @@ function make_cam(x0,y0,focal)
 	return c
 end
 
+function fillpoly(p,c)
+	if #p>2 then
+		local x0,y0=cam:project2d(p[1])
+		for i=2,#p-1 do
+			local x1,y1=cam:project2d(p[i])
+			local x2,y2=cam:project2d(p[i+1])
+			trifill(x0,y0,x1,y1,x2,y2,c)
+		end
+	end
+end
+
 function draw_ground(self)
 
 	-- draw horizon
-	local zfar=-96
+	local zfar=-256
 	local x,y=-64*zfar/64,64*zfar/64
 	local farplane={
 			{x,y,zfar},
 			{x,-y,zfar},
 			{-x,-y,zfar},
 			{-x,y,zfar}}
-	-- ground point in cam space	
-	local p={0,cam.pos[2],0}
-	m_x_v(cam.m,p)
-
 	-- ground normal in cam space
 	local n={0,1,0}
 	m_x_v(cam.m,n)
 
-	local v0=farplane[#farplane]
-	local horiz={}
-	for i=1,#farplane do
-		local v1=farplane[i]
-		local s=plane_ray_intersect(n,p,v0,v1)
-		if(s) add(horiz,s)
-		v0=v1
+ local shades={0x77,0x76,0xc6,0xcc}
+ fillp(0xa5a5)
+	for k=0,3 do
+ 	-- ground point in cam space	
+ 	local p={0,cam.pos[2]-10*k*k,0}
+ 	m_x_v(cam.m,p)
+ 
+ 	local v0=farplane[#farplane]
+ 	local ground,sky={},{}
+ 	for i=1,#farplane do
+ 		local v1=farplane[i]
+ 		plane_ray_intersect(n,p,v0,v1,sky)
+ 		v0=v1
+ 	end
+ 	
+ 	-- view frustrum
+ 	--[[
+ 	local x0,y0=cam:project2d(farplane[#farplane])
+ 	for i=1,#farplane do
+ 		local x1,y1=cam:project2d(farplane[i])
+ 		line(x0,y0,x1,y1,1)
+ 		x0,y0=x1,y1
+ 	end
+ 	]]
+ 	
+ 	-- complete line?
+ 	fillpoly(sky,shades[k+1])
 	end
 	
-	-- view frustrum
 	--[[
-	local x0,y0=cam:project2d(farplane[#farplane])
-	for i=1,#farplane do
-		local x1,y1=cam:project2d(farplane[i])
-		line(x0,y0,x1,y1,1)
-		x0,y0=x1,y1
-	end
-	]]
-	
-	-- complete line?
 	if #horiz==2 then
 		local x0,y0=cam:project2d(horiz[1])
 		local x1,y1=cam:project2d(horiz[2])
 		line(x0,y0,x1,y1,3)
 	end
+	]]
 
+ -- sun
+	local x,y,z,w=cam:project(cam.pos[1],cam.pos[2]+89,cam.pos[3]+20)
+	if x then
+	 circfill(x,y,7+rnd(2),0xc7)
+	 circfill(x,y,5,0x7a)
+	end
+	fillp()
+
+ 
 	local cy=cam.pos[2]
 
 	local scale=4*max(flr(cy/32+0.5),1)
@@ -521,7 +548,7 @@ function _update60()
 end
 
 function _draw()
-	cls()
+	cls(4)
 
  -- draw horizon
 	-- todo
@@ -576,3 +603,49 @@ function draw_stats()
 end
 ]]
 
+-->8
+-- trifill
+-- by @p01
+function p01_trapeze_h(l,r,lt,rt,y0,y1)
+ lt,rt=(lt-l)/(y1-y0),(rt-r)/(y1-y0)
+ if(y0<0)l,r,y0=l-y0*lt,r-y0*rt,0 
+	for y0=y0,min(y1,128) do
+  rectfill(l,y0,r,y0)
+  l+=lt
+  r+=rt
+ end
+end
+function p01_trapeze_w(t,b,tt,bt,x0,x1)
+ tt,bt=(tt-t)/(x1-x0),(bt-b)/(x1-x0)
+ if(x0<0)t,b,x0=t-x0*tt,b-x0*bt,0 
+ for x0=x0,min(x1,128) do
+  rectfill(x0,t,x0,b)
+  t+=tt
+  b+=bt
+ end
+end
+
+function trifill(x0,y0,x1,y1,x2,y2,col)
+ color(col)
+ if(y1<y0)x0,x1,y0,y1=x1,x0,y1,y0
+ if(y2<y0)x0,x2,y0,y2=x2,x0,y2,y0
+ if(y2<y1)x1,x2,y1,y2=x2,x1,y2,y1
+ if max(x2,max(x1,x0))-min(x2,min(x1,x0)) > y2-y0 then
+  col=x0+(x2-x0)/(y2-y0)*(y1-y0)
+  p01_trapeze_h(x0,x0,x1,col,y0,y1)
+  p01_trapeze_h(x1,col,x2,x2,y1,y2)
+ else
+  if(x1<x0)x0,x1,y0,y1=x1,x0,y1,y0
+  if(x2<x0)x0,x2,y0,y2=x2,x0,y2,y0
+  if(x2<x1)x1,x2,y1,y2=x2,x1,y2,y1
+  col=y0+(y2-y0)/(x2-x0)*(x1-x0)
+  p01_trapeze_w(y0,y0,y1,col,x0,x1)
+  p01_trapeze_w(y1,col,y2,y2,x1,x2)
+ end
+end
+
+__gfx__
+00000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000c00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00700700600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00077000700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
