@@ -3,7 +3,7 @@ config.txt
 /backup/
 /bbs/
 /carts/demos
-/cdata
+/cdata/
 *.blend1
 *.bin
-
+/.vscode/
