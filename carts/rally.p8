@@ -1597,6 +1597,7 @@ function draw_hud()
 	track:draw()
 end
 
+--[[
 function draw_curve(s,x,y,t,curve)
 	local h=y+24
 	rectfill(x,y,x+32,h,1)
@@ -1607,6 +1608,7 @@ function draw_curve(s,x,y,t,curve)
 	t=min(abs(t),1)
 	line(x+32*t,y+6,x+32*t,h,8)
 end
+]]
 
 function _draw()
 	cls(0)
@@ -1619,14 +1621,14 @@ function _draw()
 	--[[
 	local p=ghost.pos
 	print(flr(p[1]).."/"..flr(p[2]).."/"..flr(p[3]),90,2,7)
-	]]
 	
 	draw_curve("f.sa",1,20,plyr.slip_angles[1],sa_curve)
 	draw_curve("r.sa",1,46,plyr.slip_angles[2],sa_curve)
 	
 	draw_curve("f.sr",94,20,plyr.slip_ratio[1],sr_curve)
 	draw_curve("r.sr",94,46,plyr.slip_ratio[2],sr_curve)
-	
+	]]
+		
 	--[[	
 	if plyr.angle then
 		print((plyr.angle-1)*360,2,74,7)

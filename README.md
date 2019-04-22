@@ -1,27 +1,13 @@
-# Pico-8
-Misc. games for PICO-8
+# GHOST Rally
 
-Playable games here: https://www.lexaloffle.com/bbs/?uid=25532&mode=carts or https://freds72.itch.io/
+Game runs on pico-8 and uses rigid body physic to simulate a rally racing car.
 
-# Games
-## Nuklear Klone
-Demake of Vlambeer NuclearThrone
+Credits:
+- Randy Gaul qu3e engine: https://github.com/RandyGaul/qu3e
+- ...
 
-![intro](pics/nuke_gameplay.gif)
+Game can be played online at: https://freds72.itch.io/ (not yet published)
 
-## Thunderblade
-Demake of classic Sega arcade game
+![weeee!](pics/turnaround.gif)
 
-![lift off!](pics/thunderblade_teaser.gif)
-
-## Antialiased Asteroids
-Collaboration with [Felice Enellen](https://twitter.com/Felice_Enellen) bringing fast aa-lines to PICO-8
-
-![retina display](pics/aasteroids_teaser.gif)
-
-## X-Wing vs. Tie Figthers
-Demake of Sharp X68000 "Attack on the Deathstar"
-
-![tie chasing](pics/tie_chase.gif)
-
-
+![fail :/](pics/fail.gif)
