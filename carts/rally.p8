@@ -1,6 +1,9 @@
 pico-8 cartridge // http://www.pico-8.com
-version 16
+version 18
 __lua__
+-- ghost rally
+-- by @freds72
+
 -- globals
 local time_t,time_dt=0,1/30
 local actors,ground_actors,parts,v_light,cam,plyr,active_ground_actors={},{},{},{0,1,0}
@@ -103,11 +106,6 @@ end
 function rndarray(a)
 	return a[flr(rnd(#a))+1]
 end
---[[
-function acos(c)
- return atan2(c,sqrt(1-c*c))
-end
-]]
 
 -- https://github.com/morgan3d/misc/tree/master/p8sort
 function sort(data)
@@ -473,7 +471,7 @@ function make_plyr(p,angle)
  		-- make sure to keep velocity
  		-- to compute adjust ratio
  		local t=abs(sa)/12
-			plyr.slip_angles[sensor]=t
+			-- plyr.slip_angles[sensor]=t
 			sa_ratio=apply_curve(sa_curve,t)
 		end	
 		
@@ -490,7 +488,7 @@ function make_plyr(p,angle)
 			slide=true
 		end
 		-- todo: include terrain quality
-		plyr.slip_ratio[sensor]=abs(sr)
+		-- plyr.slip_ratio[sensor]=abs(sr)
 				
 		-- adjust long
 		-- 12: 4wd
@@ -530,6 +528,12 @@ function make_plyr(p,angle)
 		q=q,
 		-- init orientation
 		m=m_from_q(q),
+		-- obj to world space
+		pt_toworld=function(self,p)
+			p=m_x_v(self.m,p)
+			v_add(p,self.pos)
+			return p
+		end,
 		draw=function(self)
 			draw_model(model,self.m,self.pos)
 		end,
@@ -613,7 +617,6 @@ function make_plyr(p,angle)
 	return add(actors,make_rigidbody(a,all_models["205gti_bbox"]))
 end
 
---[[
 function make_ghost()
 	local model,k,best,hist,m=all_models["205gti"],1,{},{}
 	-- listen to track event
@@ -654,7 +657,6 @@ function make_ghost()
 		end
 	})
 end
-]]
 
 -- note: limited to a single actor per tile
 local all_ground_actors={
@@ -758,12 +760,6 @@ function make_rigidbody(a,bbox)
 		v=v_zero(),
 		omega=v_zero(),
 		mass_inv=1/a.mass,
-		-- obj to world space
-		pt_toworld=function(self,p)
-			p=m_x_v(self.m,p)
-			v_add(p,self.pos)
-			return p
-		end,
 		-- world velocity
 		pt_velocity=function(self,p)
 			p=make_v_cross(self.omega,make_v(self.pos,p))
@@ -985,6 +981,9 @@ function make_track(best_t,segments)
 			local x,y=cam:project(p)
 			local s=dist<0 and "+128" or flr(dist).."m"
 			printb(s,mid(x,0,127-5*#s),mid(y,32,120),7)
+		
+			x,y=cam:project(ghost.pos)
+			printb("🐱",mid(x,0,127),mid(y,32,120),1)		
 		end
 	}
 end
@@ -1009,10 +1008,10 @@ function make_cam(focal)
 			local x,y,z=v[1]-self.lookat[1],-self.lookat[2],v[3]-self.lookat[3]
 			z,y=cc*z+ss*y,-ss*z+cc*y
 
-			local xe,ye,ze=x,y,z-dist
+			local ze=z-dist
 
 			local w=-focal/ze
-  			return 64+xe*w,64-(v[2]+ye)*w,ze,w
+  			return 63.5+ceil(x*w),63.5-ceil((v[2]+y)*w),ze,w
 		end
 	}
 end
@@ -1445,7 +1444,7 @@ function start_state()
 	track=make_track(4500,unpack_track())
 
 	-- init ghost
-	-- ghost=make_ghost()
+	ghost=make_ghost()
 
 	-- read actors
 	unpack_actors()
@@ -1455,8 +1454,8 @@ function start_state()
 	plyr=make_plyr({pos[1],pos[2]+4,pos[3]},track:get_dir(pos))
 
 	-- debug
-	plyr.slip_angles={0,0}
-	plyr.slip_ratio={0,0}
+	--plyr.slip_angles={0,0}
+	--plyr.slip_ratio={0,0}
 
 	
 	local ttl=120
@@ -1621,14 +1620,16 @@ function _draw()
 	--[[
 	local p=ghost.pos
 	print(flr(p[1]).."/"..flr(p[2]).."/"..flr(p[3]),90,2,7)
-	
+	]]
+
+	--[[	
 	draw_curve("f.sa",1,20,plyr.slip_angles[1],sa_curve)
 	draw_curve("r.sa",1,46,plyr.slip_angles[2],sa_curve)
 	
 	draw_curve("f.sr",94,20,plyr.slip_ratio[1],sr_curve)
 	draw_curve("r.sr",94,46,plyr.slip_ratio[2],sr_curve)
 	]]
-		
+	
 	--[[	
 	if plyr.angle then
 		print((plyr.angle-1)*360,2,74,7)
@@ -1687,7 +1688,7 @@ function _init()
 		end
 	end
 		
-	cam=make_cam(96)
+	cam=make_cam(95.5)
 		
 	-- init state machine
 	next_state(start_state)
@@ -2087,5 +2088,5 @@ __sfx__
 000900001e7501e7001d7001d7001c7001b7001a70018700167001570013700117000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000500002075020750207402073020730207202071020710127001d7001d700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000200040e3500e6500e3500e6500c350076500435001650013500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-001000003f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503e0503a050380503605033050300502e0502c0502b0502a05029050280502705027050270502605026050
+001000003f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503e05038050350502c050250501e0501805016050150501305013050120501205011050110501105011050
 001000003f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503f0503e0503b05039050380503605034050310502c05027050220501e0501c0501805014050
