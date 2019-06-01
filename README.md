@@ -8,6 +8,8 @@ Credits:
 
 Game can be played online at: https://freds72.itch.io/ (not yet published)
 
+![title](pics/title.gif)
+
 ![weeee!](pics/turnaround.gif)
 
 ![fail :/](pics/fail.gif)
