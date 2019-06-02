@@ -13,8 +13,6 @@ def call(args):
     #
     return exitcode, out, err
 
-# file_list = ['deathstar','junk2','tie','xwing','ywing','title','turret','trench1','vent','mfalcon','generator','tiex1']
-# file_list = ['audi','audi_bbox','vtree']
 file_list = ['205gti','205gti_bbox']
 s = "{:02x}".format(len(file_list))
 for blend_file in file_list:
