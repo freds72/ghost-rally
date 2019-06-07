@@ -6,7 +6,7 @@ Credits:
 - Randy Gaul qu3e engine: https://github.com/RandyGaul/qu3e
 - ...
 
-Game can be played online at: https://freds72.itch.io/ (not yet published)
+Game can be played online at: https://www.lexaloffle.com/bbs/?tid=34424
 
 ![title](pics/title.gif)
 
