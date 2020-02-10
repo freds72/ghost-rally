@@ -351,51 +351,45 @@ function draw_model(model,m,pos,outline)
 		-- viz calculation
 		if v_dot(f.n,cam_pos)>=f.cp then
 			-- project vertices
-			local z=0
-			for _,vi in pairs(f.vi) do
-				if not p[vi] then
+			local z,verts=0,{}
+			for ki,vi in pairs(f.vi) do
+				local a=p[vi]
+				if not a then
 					local v=m_x_v(m,model.v[vi])
 					v_add(v,pos)
 					local x,y,z,w=cam:project(v)
 					-- avoid rehash for u/v
-					p[vi]={x,y,0,0}
+					a={x,y,z,w}
+					p[vi]=a
 				end
-				z+=p[vi][3]
+				z+=a[3]
+				local w=a[4]
+				verts[ki]={a[1],a[2],w,f.uv[ki].u*w,f.uv[ki].v*w}
 			end
 			-- register faces
-			add(faces,{key=#f.vi/z,face=f})
+			add(faces,{key=#f.vi/z,face=f,v=verts})
 		end
 	end
 
- if not outline then
+	local pf=polyfill
+	if outline then
+		fillp(0xf0f0.f)
+	else
 		-- sort faces
 		sort(faces)
+		pf=polytex
 	end
 	
 	-- draw faces using projected points
 	for _,f in pairs(faces) do
-		f=f.face
-		local p0,uv0=p[f.vi[1]],f.uv[1]
-		p0[3],p0[4]=uv0[1],uv0[2]
-		for i=2,#f.vi-1 do
-			local p1,p2=p[f.vi[i]],p[f.vi[i+1]]
-			if outline then
-				fillp(0xf0f0.f)
-				trifill(p0[1],p0[2],p1[1],p1[2],p2[1],p2[2],0x1)
-				fillp()
-			else
-				local uv1,uv2=f.uv[i],f.uv[i+1]
-				p1[3],p1[4]=uv1[1],uv1[2]
-				p2[3],p2[4]=uv2[1],uv2[2]
-				tritex(p0,p1,p2)
-			end
-		end	
+		pf(f.v,1)
 	end
+	fillp()
 end
-
 function draw_model_shadow(model,m,pos)
  	fillp(0xa5a5.f)
-	-- v_light dir in object space
+
+	 -- v_light dir in object space
 	local l=v_clone(v_light)
 	m_inv_x_v(m,l)
 	
@@ -405,22 +399,22 @@ function draw_model_shadow(model,m,pos)
 		-- viz calculation
 		if v_dot(f.n,l)<0 then
 			-- project vertices
-			for _,vi in pairs(f.vi) do
-				if not p[vi] then
+			local verts={}
+			for ki,vi in pairs(f.vi) do
+				local a=p[vi]
+				if not a then
 					local v=m_x_v(m,model.v[vi])
 					v_add(v,pos)
 					v[2]=get_altitude_and_n(v)
 					local x,y,z,w=cam:project(v)
-					p[vi]={x,y,z,w}
+					a={x,y}
+					p[vi]=a
 				end
+				verts[ki]=a
 			end
 			-- draw faces using projected points
 			-- (no need to sort)
-			local p0=p[f.vi[1]]
-		 	for i=2,#f.vi-1 do
-			 	local p1,p2=p[f.vi[i]],p[f.vi[i+1]]
-		 		trifill(p0[1],p0[2],p1[1],p1[2],p2[1],p2[2],1)
-			end
+			polyfill(verts,1)
 		end
 	end
 	fillp()
@@ -558,7 +552,7 @@ function make_plyr(p,angle)
 			plyr.pos[3]+=z/4
 		]]
 		
-			turn+=0.2*angle
+			turn+=0.1*angle
 			-- brake (full lock:0)
 			if btn(3) then
 				brake=max(brake-0.1)
@@ -585,7 +579,7 @@ function make_plyr(p,angle)
 				local pos=v_clone(self.pos)
 				v_add(pos,m_up(self.m),3)
 				local force=v_clone(v_up)
-				v_scale(force,12)
+				v_scale(force,30)
 				self:add_force(force,pos)
 			end
 		end,
@@ -692,11 +686,14 @@ end
 -- normal
 -- body contact point (world position)
 -- penetration
-function make_contact_solver(a,p,n,d)
+function is_contact(a,p,n,d)
 	local padot=a:pt_velocity(p)
 	local vrel=v_dot(n,padot)
 	-- resting condition?
 	if(d<k_small and vrel>-k_small_v) return
+ return true
+end
+function make_contact_solver(a,p,n,d)
 	local nimpulse=0
 	local ra=make_v(a.pos,p)
 	local racn=make_v_cross(ra,n)
@@ -761,7 +758,7 @@ function make_rigidbody(a,bbox)
 	-- invert 
 	local ibody_inv=m_inv(ibody)
 	-- 
-	local g={0,-12*a.mass,0}
+	local g={0,-24*a.mass,0}
 	
 	local rb={
 		i_inv=make_m(),
@@ -834,6 +831,7 @@ function make_rigidbody(a,bbox)
 		update_contacts=function(self,contacts)
 			-- ground contacts against incident face
 			local f=self:incident_face(v_up)
+			local raw_contacts={}
 			for _,vi in pairs(f.vi) do
 				local v=bbox.v[vi]
 				-- to world space
@@ -843,11 +841,17 @@ function make_rigidbody(a,bbox)
 				if depth>k_small then
 					depth=v_dot(n,{0,depth,0})
 					-- deep enough?
-					if depth>-k_small then
-						local ct=make_contact_solver(self,p,n,depth)
-						if ct then
-							add(contacts,ct)
-							-- record contact time
+					if depth>-k_small then						
+						if is_contact(self,p,n,depth) then
+						 -- find contact by normal
+						 local cn=raw_contacts[n] or {v_zero(),v_clone(n),0,0}
+					 	v_add(cn[1],p)
+					 	v_add(cn[2],n)
+	 			 	v_normz(cn[2])
+							cn[3]+=depth
+							cn[4]+=1	
+						 raw_contacts[n]=cn
+						 -- record contact time
 							v.last_contact_t,v.contact_t=v.contact_t,time_t
 							v.n=n
 						end
@@ -855,6 +859,12 @@ function make_rigidbody(a,bbox)
 				end
 			end
 			
+			for _,c in pairs(raw_contacts) do
+				-- average position
+				v_scale(c[1],c[4])				
+				add(contacts,make_contact_solver(self,c[1],c[2],c[3]/c[4]))
+			end
+						
 			-- hit ground actors?
 			for _,a in pairs(active_ground_actors) do
 				local v=plyr:is_colliding(a.pos)
@@ -1001,7 +1011,7 @@ function make_track(best_t,segments)
 			local angle,p=self:get_dir(plyr.pos)
 			print_dist("",p,dist,0.5,7)
 			
-			if ghost:is_active() then
+			if ghost and ghost:is_active() then
 				print_dist("░",ghost.pos,dist,12,10)
 			end
 		end
@@ -1017,7 +1027,7 @@ function make_cam(focal)
 		pos={0,6*hscale,0},
 		lookat={0,0,-7*16},
 		track=function(self,pos,angle,d)
-			--dist=d
+			dist=lerp(dist,d,0.1)
 			self.pos=v_clone(pos)
 			self.lookat=v_clone(pos)
 			cc,ss=cos(angle),-sin(angle)
@@ -1031,7 +1041,7 @@ function make_cam(focal)
 			local ze=z-dist
 
 			local w=-focal/ze
-  			return 63.5+ceil(x*w),63.5-ceil((v[2]+y)*w),ze,w
+  			return 63.5+x*w,63.5-(v[2]+y)*w,ze,w
 		end
 	}
 end
@@ -1300,7 +1310,7 @@ function draw_ground(self)
 		
 		-- todo: unit for w?
 		local h0,h1=get_height(ni,nj),get_height(ni,nj+1)
-		local y0,y1=flr(v0[2]-w0*h0),flr(v1[2]-w1*h1)
+		local y0,y1=v0[2]-w0*h0,v1[2]-w1*h1
 		local q0=get_raw_qcode(ni,nj)
 		while i<=ground_right do
 			local q3=get_raw_qcode(ni+1,nj)
@@ -1313,7 +1323,7 @@ function draw_ground(self)
 			end
 			local x2,x3=x1+di*dw1,x0+di*dw0
 			local h2,h3=get_height(ni+di,nj+1),get_height(ni+di,nj)
-			local y2,y3=flr(v1[2]-w1*h2),flr(v0[2]-w0*h3)
+			local y2,y3=v1[2]-w1*h2,v0[2]-w0*h3
 
 			-- in screen tile?
 			if x3>0 then
@@ -1338,21 +1348,24 @@ function draw_ground(self)
 					x2,y2=lerp(x3,x2,dz),lerp(y3,y2,dz)
 				end
 				
-				local c_hi,c_lo,c_dither=shr(band(0b00111000,q0),3),band(0b111,q0)
+				local c_hi,c_lo=shade(shr(band(0b00111000,q0),3)),shade(band(0b111,q0))
 
-				local strip=band(ni,2)+band(nj,2)
-				c_hi,c_lo=shade(c_hi),shade(c_lo)
+				fillp(dither_pat2[shr(band(ni,2)+band(nj,2),1)+1])
 
-				fillp(dither_pat2[strip/2+1])
-
-				if band(q0,0x40)>0 then
-					trifill(x0,y0,x2,y2,x1,y1,c_hi)
-					trifill(x0,y0,x2,y2,x3,y3,c_lo)
+				-- single color quad?
+				if c_hi==c_lo then
+					polyfill({{x0,y0},{x1,y1},{x2,y2},{x3,y3}},c_hi)
 				else
-					trifill(x1,y1,x3,y3,x0,y0,c_lo)
-					trifill(x1,y1,x3,y3,x2,y2,c_hi)
+					-- boundary triangles
+					if band(q0,0x40)>0 then
+						polyfill({{x0,y0},{x2,y2},{x1,y1}},c_hi)
+						polyfill({{x0,y0},{x2,y2},{x3,y3}},c_lo)
+					else
+						polyfill({{x1,y1},{x3,y3},{x0,y0}},c_lo)
+						polyfill({{x1,y1},{x3,y3},{x2,y2}},c_hi)
+					end
 				end
-				
+
 				-- restore values (for clipping)
 				x0,y0,x3,y3=xx0,yy0,xx3,yy3
 				x1,y1,x2,y2=xx1,yy1,xx2,yy2
@@ -1550,7 +1563,7 @@ function _update()
 		v_add(lookat,m_fwd(plyr.m),3)
 		-- keep altitude
 		lookat[2]=plyr.pos[2]+2
-		cam:track(lookat,0.15)
+		cam:track(lookat,0.15,lerp(8,16,plyr.rpm_ratio))
 	end
 end
 
@@ -1649,11 +1662,11 @@ function _draw()
 	end	
 	]]
 
-	rectfill(0,0,127,8,8)
-	print("mem:"..stat(0).." cpu:"..stat(1).."("..stat(7)..")",2,2,7)
+ 	-- rectfill(0,0,127,8,8)
+	--print(solver_i/solver_n,2,1,1)
+	-- print("mem:"..stat(0).." cpu:"..stat(1).."("..stat(7)..")",2,2,7)
  
- --print(plyr.acc,2,18,7)
- 
+ 	--print(plyr.acc,2,18,7) 
 end
 
 function _init()
@@ -1709,45 +1722,37 @@ function _init()
 end
 
 -->8
--- trifill
--- by @p01
-function p01_trapeze_h(l,r,lt,rt,y0,y1)
- lt,rt=(lt-l)/(y1-y0),(rt-r)/(y1-y0)
- if(y0<0)l,r,y0=l-y0*lt,r-y0*rt,0 
-	for y0=y0,min(y1,128) do
-  rectfill(l,y0,r,y0)
-  l+=lt
-  r+=rt
- end
-end
-function p01_trapeze_w(t,b,tt,bt,x0,x1)
- tt,bt=(tt-t)/(x1-x0),(bt-b)/(x1-x0)
- if(x0<0)t,b,x0=t-x0*tt,b-x0*bt,0 
- for x0=x0,min(x1,128) do
-  rectfill(x0,t,x0,b)
-  t+=tt
-  b+=bt
- end
+function polyfill(p,col)
+	color(col)
+	local p0,nodes=p[#p],{}
+	local x0,y0=p0[1],p0[2]
+
+	for i=1,#p do
+		local p1=p[i]
+		local x1,y1=p1[1],p1[2]
+		-- backup before any swap
+		local _x1,_y1=x1,y1
+		if(y0>y1) x0,y0,x1,y1=x1,y1,x0,y0
+		-- exact slope
+		local dx=(x1-x0)/(y1-y0)
+		if(y0<0) x0-=y0*dx y0=0
+		-- subpixel shifting (after clipping)
+		local cy0=ceil(y0)
+		x0+=(cy0-y0)*dx
+		for y=cy0,min(ceil(y1)-1,127) do
+			local x=nodes[y]
+			if x then
+				rectfill(x,y,x0,y)
+			else
+				nodes[y]=x0
+			end
+			x0+=dx
+		end
+		-- next vertex
+		x0,y0=_x1,_y1
+	end
 end
 
-function trifill(x0,y0,x1,y1,x2,y2,col)
- color(col)
- if(y1<y0)x0,x1,y0,y1=x1,x0,y1,y0
- if(y2<y0)x0,x2,y0,y2=x2,x0,y2,y0
- if(y2<y1)x1,x2,y1,y2=x2,x1,y2,y1
- if max(x2,max(x1,x0))-min(x2,min(x1,x0)) > y2-y0 then
-  col=x0+(x2-x0)/(y2-y0)*(y1-y0)
-  p01_trapeze_h(x0,x0,x1,col,y0,y1)
-  p01_trapeze_h(x1,col,x2,x2,y1,y2)
- else
-  if(x1<x0)x0,x1,y0,y1=x1,x0,y1,y0
-  if(x2<x0)x0,x2,y0,y2=x2,x0,y2,y0
-  if(x2<x1)x1,x2,y1,y2=x2,x1,y2,y1
-  col=y0+(y2-y0)/(x2-x0)*(x1-x0)
-  p01_trapeze_w(y0,y0,y1,col,x0,x1)
-  p01_trapeze_w(y1,col,y2,y2,x1,x2)
- end
-end
 
 -->8
 -- unpack models & data
@@ -1794,7 +1799,7 @@ function unpack_models()
 			end)
 			-- uv coords (if any)
 			unpack_array(function()
-				add(f.uv,{unpack_int(),unpack_int()})
+				add(f.uv,{u=unpack_int(),v=unpack_int()})
 			end)
 			-- center point
 			f.center={unpack_float(scale),unpack_float(scale),unpack_float(scale)}
@@ -1862,61 +1867,57 @@ function unpack_curve(sfx)
 	return bytes
 end
 -->8
--- trifilltex
--- 
-function trapezefill(l,dl,r,dr,start,finish)
-	-- layout:x y u v
-	local l,dl={l[1],l[3],l[4],r[1],r[3],r[4]},{dl[1],dl[3],dl[4],dr[1],dr[3],dr[4]}
-	local dt=1/(finish-start)
-	for k,v in pairs(dl) do
-		dl[k]=(v-l[k])*dt
-	end
-
-	-- cliping
-	if start<0 then
-		for k,v in pairs(dl) do
-			l[k]-=start*v
-		end
-		start=0
-	end
-
-	-- rasterization
-	for j=start,min(finish,127) do
-		local len=l[4]-l[1]
-		if len>0 then
-			local u0,v0=l[2],l[3]
-			local du,dv=(l[5]-u0)/len,(l[6]-v0)/len
-			for i=l[1],l[4] do
-				local c=sget(u0,v0)
-				if(c!=11) pset(i,j,c)
-				u0+=du
-				v0+=dv
+-- textured edge renderer
+function polytex(v)
+	local v0,nodes=v[#v],{}
+	local x0,y0,w0,u0,v0=v0[1],v0[2],v0[3],v0[4],v0[5]
+	for i=1,#v do
+		local v1=v[i]
+		local x1,y1,w1,u1,v1=v1[1],v1[2],v1[3],v1[4],v1[5]
+		local _x1,_y1,_u1,_v1,_w1=x1,y1,u1,v1,w1
+		if(y0>y1) x0,y0,x1,y1,w0,w1,u0,v0,u1,v1=x1,y1,x0,y0,w1,w0,u1,v1,u0,v0
+		local dy=y1-y0
+		local dx,dw,du,dv=(x1-x0)/dy,(w1-w0)/dy,(u1-u0)/dy,(v1-v0)/dy
+		if(y0<0) x0-=y0*dx u0-=y0*du v0-=y0*dv w0-=y0*dw y0=0
+		local cy0=ceil(y0)
+		-- sub-pix shift
+		local sy=cy0-y0
+		x0+=sy*dx
+		u0+=sy*du
+		v0+=sy*dv
+		w0+=sy*dw
+		for y=cy0,min(ceil(y1)-1,127) do
+			local x=nodes[y]
+			if x then
+				-- rectfill(x[1],y,x0,y)
+				
+				local a,aw,au,av,b,bw,bu,bv=x[1],x[2],x[3],x[4],x0,w0,u0,v0
+				if(a>b) a,aw,au,av,b,bw,bu,bv=b,bw,bu,bv,a,aw,au,av
+				local dab=b-a
+				local daw,dau,dav=(bw-aw)/dab,(bu-au)/dab,(bv-av)/dab
+				local ca=ceil(a)
+				-- sub-pix shift
+				local sa=ca-a
+				au+=sa*dau
+				av+=sa*dav
+				aw+=sa*daw
+				for k=ca,min(ceil(b)-1,127) do
+					local c=sget(au/aw,av/aw)
+					if(c!=11) pset(k,y,c)
+					au+=dau
+					av+=dav
+					aw+=daw
+				end
+			else
+				nodes[y]={x0,w0,u0,v0}
 			end
-  end 
-		for k,v in pairs(dl) do
-			l[k]+=v
+			x0+=dx
+			u0+=du
+			v0+=dv
+			w0+=dw
 		end
+		x0,y0,w0,u0,v0=_x1,_y1,_w1,_u1,_v1
 	end
-end
-function tritex(v0,v1,v2)
-	local x0,x1,x2=v0[1],v1[1],v2[1]
-	local y0,y1,y2=v0[2],v1[2],v2[2]
-	if(y1<y0)v0,v1,x0,x1,y0,y1=v1,v0,x1,x0,y1,y0
-	if(y2<y0)v0,v2,x0,x2,y0,y2=v2,v0,x2,x0,y2,y0
-	if(y2<y1)v1,v2,x1,x2,y1,y2=v2,v1,x2,x1,y2,y1
-
-	-- mid point
-	local v02,mt={},1/(y2-y0)*(y1-y0)
-	for k,v in pairs(v0) do
-		v02[k]=v+(v2[k]-v)*mt
-	end
-	if(x1>v02[1])v1,v02=v02,v1
-
-	-- note: no need to x/y optimize as we are drawing per pixel
-	-- upper trapeze
-	trapezefill(v0,v1,v0,v02,y0,y1)
-	-- lower trapeze
-	trapezefill(v1,v2,v02,v2,y1,y2)
 end
 -->8
 -- print helpers
