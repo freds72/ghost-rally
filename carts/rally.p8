@@ -1,5 +1,5 @@
 pico-8 cartridge // http://www.pico-8.com
-version 18
+version 33
 __lua__
 -- ghost rally
 -- by @freds72
@@ -19,8 +19,7 @@ local k_bias=0.2
 local k_slop=0.05
 
 -- world units
-local ground_shift,hscale=1,4
-local ground_scale=2^ground_shift
+local hscale=4
 local ground_left,ground_right,ground_far,ground_near=-7,7,7,-7
 local v_grav={0,-1,0}
 local world={}
@@ -37,15 +36,15 @@ function zbuf_clear()
 end
 function zbuf_sort()
  zbuf={}
-	local ci,cj=flr(shr(cam.lookat[1],ground_shift)),flr(shr(cam.lookat[3],ground_shift))
+	local ci,cj=cam.lookat[1]\2,cam.lookat[3]\2
 	for _,d in pairs(drawables) do
 		-- find cell location
-		local di,dj=flr(shr(d.pos[1],ground_shift)),flr(shr(d.pos[3],ground_shift))
+		local di,dj=d.pos[1]\2,d.pos[3]\2
 		-- todo: incorrect
 		-- within viz grid?
 		if abs(di-ci)<6 and abs(dj-cj)<10 then
 			-- safe index
-			dj=band(dj,0x7f)
+			dj&=0x7f
 			zbuf[dj]=zbuf[dj] or {}
 			add(zbuf[dj],{obj=d,key=d.pos[3]})
 		end
@@ -439,7 +438,7 @@ function ssprt(self,s,x,y,z,w)
 	w*=0.1875*sw
 	s=s or self.spr
 	-- todo: bench
-	local sx,sy=shl(s,3)%128,shl(flr(s/16),3)
+	local sx,sy=(s<<3)&127,(s\16)<<3
 	sspr(sx,sy,sw,sw,x-w/2,y-w/2,w,w)
 	palt()
 end
@@ -663,7 +662,7 @@ local all_ground_actors={
 	{rnd={spr={66,68,98,33}},hit_part="angel",hit_t=150},
 }
 function make_ground_actor(i,j,kind)
-	local x,z,idx=shl(i+rnd(),ground_shift),shl(j+rnd(),ground_shift),safe_index(i,j)
+	local x,z,idx=(i+rnd())<<1,(j+rnd())<<1,safe_index(i,j)
 	local a=clone(all_ground_actors[kind],{
 		pos={x,get_altitude_and_n({x,0,z})+0.5,z},
 		idx=idx,
@@ -1013,8 +1012,7 @@ end
 -- camera
 function make_cam(focal)
 	-- camera rotation
-	local cc,ss=1,0
-	local dist=shl(8,ground_shift)
+	local cc,ss,dist=1,0,16
 	return {
 		pos={0,6*hscale,0},
 		lookat={0,0,-7*16},
@@ -1190,7 +1188,7 @@ end
 -- map helpers (marching codes, height map, normal map cache)
 local qmap,hmap={},{}
 function safe_index(i,j)
-	return bor(band(i,0x7f),shl(band(j,0x7f),7))
+	return i&0x7f|(j&0x7f)<<7
 end
 function get_raw_qcode(i,j)
 	return qmap[safe_index(i,j)] or 0
@@ -1203,16 +1201,16 @@ end
 function get_altitude_and_n(v,with_n)
 	-- cell
 	local x,z=v[1],v[3]
-	local dx,dz=shr(x%ground_scale,ground_shift),shr(z%ground_scale,ground_shift)
-	local i,j=flr(shr(x,ground_shift)),flr(shr(z,ground_shift))
+	local dx,dz=(x%2)>>1,(z%2)>>1
+	local i,j=x\2,z\2
 	local h0,h1,n
 	if dx>dz then
 		local h=get_height(i,j)
 		h0,h1=lerp(h,get_height(i+1,j),dz),lerp(h,get_height(i+1,j+1),dx)
 		if with_n then
 			n=make_v_cross(
-				{ground_scale,get_height(i+1,j+1)-h,ground_scale},
-				{ground_scale,get_height(i+1,j)-h,0})
+				{2,get_height(i+1,j+1)-h,2},
+				{2,get_height(i+1,j)-h,0})
 			v_normz(n)
 		end
 	else
@@ -1220,8 +1218,8 @@ function get_altitude_and_n(v,with_n)
 		h0,h1=lerp(get_height(i,j),h,dz),lerp(get_height(i,j+1),h,dx)
 		if with_n then
 			n=make_v_cross(
-				{0,get_height(i,j+1)-h,ground_scale},
-				{ground_scale,get_height(i+1,j+1)-h,ground_scale})
+				{0,get_height(i,j+1)-h,2},
+				{2,get_height(i+1,j+1)-h,2})
 			v_normz(n)
 		end
 	end
@@ -1230,7 +1228,7 @@ end
 
 -- draw actors on strip j
 function draw_actors(j)
-	local bucket=zbuf[band(j-1,0x7f)]
+	local bucket=zbuf[(j-1)&0x7f]
 	if bucket then
 		-- shadow pass
 		for _,d in pairs(bucket) do
@@ -1247,14 +1245,13 @@ end
 
 function update_ground()
 	local pos=plyr and plyr.pos or cam.lookat
-	local i0,j0=flr(shr(pos[1],ground_shift)),flr(shr(pos[3],ground_shift))
+	local i0,j0=pos[1]\2,pos[3]\2
 	-- clear active list
 	active_ground_actors={}
 	for i=i0+ground_left,i0+ground_right do
-		local cx=band(i,0x7f)
+		local cx=i&0x7f
 		for j=j0+ground_near,j0+ground_far do
-			local cy=band(j,0x7f)
-			local t=ground_actors[cx+shl(cy,7)]
+			local t=ground_actors[cx|(j&0x7f)<<7]
 			if t then
 				add(active_ground_actors,t)
 				add(drawables,t)
@@ -1264,32 +1261,32 @@ function update_ground()
 end
 
 local shade=function(c)
-	return bor(shl(sget(16,c),4),sget(17,c))
+	return @(8+(c<<7))
 end
 
 function draw_ground()
 	local cx,cz=cam.lookat[1],cam.lookat[3]
 	-- cell x/z ratio
-	local dx,dz=cx%ground_scale,cz%ground_scale
+	local dx,dz=cx%2,cz%2
 	-- cell coordinates
-	local nx,ny=flr(shr(cx,ground_shift)),flr(shr(cz,ground_shift))
+	local nx,ny=cx\2,cz\2
 	
 	-- project anchor points
-	local p,xmin={},shl(ground_left,ground_shift)-dx+cx
+	local p,xmin={},(ground_left<<1)-dx+cx
 	-- grid depth extent
 	for j=ground_near,ground_far do
 	 -- project leftmost grid points
-		local x,y,z,w=cam:project({xmin,0,-dz+cz+shl(j,ground_shift)})
+		local x,y,z,w=cam:project({xmin,0,-dz+cz+(j<<1)})
 		add(p,{x,y,z,w,ny+j})
 	end
 	
 	-- move to 0-1 range
-	dx/=ground_scale
-	dz/=ground_scale
+	dx/=2
+	dz/=2
 	
 	local v0=p[1]
 	local w0,nj=v0[4],v0[5]
-	local dw0=shl(w0,ground_shift)
+	local dw0=w0<<1
 	for j=2,#p do
 		-- offset to grid space
 		local ni=nx+ground_left
@@ -1297,7 +1294,7 @@ function draw_ground()
 		
 		local v1=p[j]
 		local w1=v1[4]
-		local dw1=shl(w1,ground_shift)
+		local dw1=w1<<1
 		local x0,x1=v0[1],v1[1]
 		
 		-- todo: unit for w?
@@ -1340,16 +1337,16 @@ function draw_ground()
 					x2,y2=lerp(x3,x2,dz),lerp(y3,y2,dz)
 				end
 				
-				local c_hi,c_lo=shade(shr(band(0b00111000,q0),3)),shade(band(0b111,q0))
+				local c_hi,c_lo=shade((0b00111000&q0)>>3),shade(0b111&q0)
 
-				fillp(dither_pat2[shr(band(ni,2)+band(nj,2),1)+1])
+				fillp(dither_pat2[((ni&2)+(nj&2)>>1)+1])
 
 				-- single color quad?
 				if c_hi==c_lo then
 					polyfill({{x0,y0},{x1,y1},{x2,y2},{x3,y3}},c_hi)
 				else
 					-- boundary triangles
-					if band(q0,0x40)>0 then
+					if q0&0x40>0 then
 						polyfill({{x0,y0},{x2,y2},{x1,y1}},c_hi)
 						polyfill({{x0,y0},{x2,y2},{x3,y3}},c_lo)
 					else
@@ -1383,68 +1380,6 @@ function draw_ground()
 	draw_actors(nj)
 end
 
---[[
-local dither_pat={0b1111111111111111,0b0111111111111111,0b0111111111011111,0b0101111111011111,0b0101111101011111,0b0101101101011111,0b0101101101011110,0b0101101001011110,0b0101101001011010,0b0001101001011010,0b0001101001001010,0b0000101001001010,0b0000101000001010,0b0000001000001010,0b0000001000001000,0b0000000000000000}
-function draw_ground()
-	local cx,cz=cam.lookat[1],cam.lookat[3]
-	-- cell x/z ratio
-	local dx,dz=cx%ground_scale,cz%ground_scale
-	-- cell coordinates
-	local nx,ny=flr(shr(cx,ground_shift)),flr(shr(cz,ground_shift))
-	
-	-- project anchor points
-	local p,i={},nx
-	local xmin,xmax,zmin,zmax=cx+shl(ground_left,ground_shift),cx+shl(ground_right-2,ground_shift),cz+shl(ground_near,ground_shift),cz+shl(ground_far-2,ground_shift)
-	for ii=ground_left,ground_right do
-		local row={}
-		for jj=ground_near,ground_far do
-			local x,y,z,w=cam:project({
-			mid(shl(ii,ground_shift)-dx+cx,xmin,xmax),
-			get_height(ii+nx,jj+ny),
-			mid(shl(jj,ground_shift)-dz+cz,zmin,zmax)})
-			add(row,{flr(x),flr(y),w,get_raw_qcode(ii+nx,jj+ny),nx+ii,ny+jj})
-		end
-		add(p,row)
-	end
-
-	local r0=p[1]
-	for j=2,#p do
-		local r1=p[j]
-		local v0,v3=r0[1],r1[1]
-		local x0,y0,x3,y3=v0[1],v0[2],v3[1],v3[2]
-		local q0,w0=v0[4],v0[3]
-		for i=2,#r1 do
-			local v1,v2=r0[i],r1[i]
-			local x1,y1,x2,y2=v1[1],v1[2],v2[1],v2[2]
-			local q1,w1=v1[4],v1[3]
-			
-			local c_hi,c_lo,c_dither=shr(band(0b00111000,q0),3),band(0b111,q0)
-
-			local ni,nj=v0[5],v0[6]
-			local strip=(nj%4<2) and 0 or 1
-			strip+=((ni%4<2) and 0 or 1)
-			c_hi,c_lo=shade(1,c_hi),shade(1,c_lo)
-
-			fillp(dither_pat2[strip+1])
-			
-			if c_hi>=1 or c_lo>=1 then
-				if band(q0,0x40)>0 then
-					trifill(x0,y0,x2,y2,x1,y1,c_hi)
-					trifill(x0,y0,x2,y2,x3,y3,c_lo)
-				else
-					trifill(x1,y1,x3,y3,x0,y0,c_lo)
-					trifill(x1,y1,x3,y3,x2,y2,c_hi)
-				end
-			end
-			v0,v3,q0=v1,v2,q1
-			x0,y0,x3,y3=x1,y1,x2,y2
-			w0=w1
-		end
-		r0=r1
-	end
-	fillp()
-end
-]]
 
 -- game states
 -- transition to next state
@@ -1719,7 +1654,7 @@ function _init()
 	i=0
 	local tmp_hmap={}
 	unpack_rle(function(v)
-		tmp_hmap[i],tmp_hmap[i+1]=shr(band(0xf0,v),4),band(0xf,v)
+		tmp_hmap[i],tmp_hmap[i+1]=(0xf0&v)>>4,0xf&v
 		-- lower heightmap
 		tmp_hmap[i]/=2
 		tmp_hmap[i+1]/=2
@@ -1839,7 +1774,7 @@ function unpack_track()
 	local track={}
 	unpack_array(function()
 		-- +1 shift to center track marker
-	 	local pos={shl(unpack_int()+1,ground_shift+1),0,shl(unpack_int()+1,ground_shift+1)}
+	 	local pos={(unpack_int()+1)<<2,0,(unpack_int()+1)<<2}
 		pos[2]=get_altitude_and_n(pos)
 		add(track,{pos=pos})
 	end)
@@ -1850,9 +1785,9 @@ function unpack_curve(sfx)
 	local bytes={}
  local addr=0x3200+68*sfx
  for k=1,16 do
- 	local note=peek4(addr)
-		add(bytes,band(shl(note,16),0x3f))
-		add(bytes,band(note,0x3f))
+ 	local note=$addr
+		add(bytes,(note<<16)&0x3f)
+		add(bytes,note&0x3f)
  	addr+=4
  end	
 	return bytes
@@ -1871,9 +1806,9 @@ for i=1,#bprint_chars do
 	local c=sub(bprint_chars,i,i)
 	cls(0)
 	?c,0,0,7
-	local mem=0x4300+shl(i-1,5)
+	local mem=0x4300+((i-1)<<5)
 	for y=0,7 do
-		memcpy(mem+4*y,0x6000+shl(y,6),4)
+		memcpy(mem+4*y,0x6000+(y<<6),4)
 	end
 	chars2mem[c]=mem
 end
@@ -1892,14 +1827,14 @@ function do_sprint(txt,x,y,s,w)
 		local mem=chars2mem[sub(txt,i,i)]
 		local xmax=0
 		for j=0,5 do
-			local mask=peek4(mem)
+			local mask=$mem
 			for k=0,7 do
-				if band(mask,0x.000f)!=0 then
+				if mask&0x.000f!=0 then
 					-- glyph support
 					if(k>xmax) xmax=k
 					spr(s,x+k*w,y+j*w)
 				end
-				mask=shr(mask,4)
+				mask>>=4
 			end
 			mem+=4
 		end
@@ -1927,14 +1862,14 @@ __gfx__
 0070070015d7670015000000ee7777565eeeeeee9aa79000e7eeee7ebb0555656c866666777777777711666665777788877766656756556bb000000000060000
 000000001567670054000000ee57655556eeeeee00000000ee7777eebb505565cc866666777777777711666665777780877777656756666bb000000001060100
 000000001556670067000000eee6565655eeeeee00000000eeeeeeeebb055565cc866666777777777711666665777787877777656756556bb000000010101010
-1ca9b3452288ee0028000000eee56565566eeeee77eeeeeeeeeeeeeebb505565ca766666777777777711666665777788877777656756666bb000000000000000
-00000000499ffa0054000000eeee55556e56eeee77eeeeeeeeeeeeeebb056565aa766666777777777711666665777778877777656756556bb000000000060000
-4950000099aaa7009a000000eeeee566ee6eeeeeeeeeeeeeeee898eebb566565a1766666777777777711666665777777777777765756666bb000000000576000
-0000000055533b003b000000eeeeeeeeeeeeeeeeeeeeeeeeee8a79eebb50656511766666777777777711666665777777778877567756556bb000000000050000
-7a9420001dcc7c001c000000eeeeeee5e56eeeeeeeeeeeeeee8979eebb56656511766666777777777711666665777778888877656756666bb000000000060000
-7e882000115dd6001d000000eeeeeeeee6eeeeeeeeeeeeeeeee898eebb05656518766666777777777711666665777788111177656756556bb000000000007000
-777770001122ee002e000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeebb5055658876666677777777771166666577778111aa77656756666bb000000007006000
-76d5d00022eeff00ef000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeebb05556585788666777777777711666665777781aacc77656756556bb000000000660000
+1ca9b3452288ee0082000000eee56565566eeeee77eeeeeeeeeeeeeebb505565ca766666777777777711666665777788877777656756666bb000000000000000
+00000000499ffa0045000000eeee55556e56eeee77eeeeeeeeeeeeeebb056565aa766666777777777711666665777778877777656756556bb000000000060000
+4950000099aaa700a9000000eeeee566ee6eeeeeeeeeeeeeeee898eebb566565a1766666777777777711666665777777777777765756666bb000000000576000
+0000000055533b00b3000000eeeeeeeeeeeeeeeeeeeeeeeeee8a79eebb50656511766666777777777711666665777777778877567756556bb000000000050000
+7a9420001dcc7c00c1000000eeeeeee5e56eeeeeeeeeeeeeee8979eebb56656511766666777777777711666665777778888877656756666bb000000000060000
+7e882000115dd600d1000000eeeeeeeee6eeeeeeeeeeeeeeeee898eebb05656518766666777777777711666665777788111177656756556bb000000000007000
+777770001122ee00e2000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeebb5055658876666677777777771166666577778111aa77656756666bb000000007006000
+76d5d00022eeff00fe000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeebb05556585788666777777777711666665777781aacc77656756556bb000000000660000
 00000000eeeeeeeeeeeeeeeeeeeee777777eeeee01010100eeeeeeeebb50556565788866777777777711666665777781acc777656756666bb000000007000000
 00000000eeeeeeeeeeeeeeeeeeeee777777eeeee10101010eeeeeeeebb05556565780866777777777711666665777781ac7766656756556bb000000077700000
 00100100eeeeeeeeeeeeeeeeeeeee777777eeeee01010100eeeeeeeebb05556565787866777777777711666667777781a7667765a756776bb000000017100000
